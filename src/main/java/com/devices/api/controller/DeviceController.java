@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.util.List;
 
 @RestController
 @RequestMapping("/devices")
@@ -20,6 +21,11 @@ public class DeviceController {
 
     public DeviceController(DeviceService service) {
         this.service = service;
+    }
+
+    @GetMapping
+    public List<DeviceDto> getAll() {
+        return service.getAll().stream().map(DeviceDto::from).toList();
     }
 
     @GetMapping("/{id}")

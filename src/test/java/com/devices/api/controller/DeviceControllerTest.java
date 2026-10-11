@@ -21,7 +21,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.client.RestTestClient;
 
 import java.time.Instant;
+import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -38,6 +40,42 @@ class DeviceControllerTest {
 
     @MockitoBean
     private DeviceService service;
+
+    @Test
+    void listsDevicesOverHttp() {
+        var saved = List.of(
+                new Device("Phone", "Brand", DeviceState.AVAILABLE),
+                new Device("Tablet", "Other", DeviceState.IN_USE),
+                new Device("Watch", "Brand", DeviceState.INACTIVE));
+        for (int index = 0; index < saved.size(); index++) {
+            ReflectionTestUtils.setField(saved.get(index), "id", (long) index + 1);
+            ReflectionTestUtils.setField(saved.get(index), "creationTime", Instant.parse("2026-10-11T10:00:00Z"));
+        }
+        when(service.getAll()).thenReturn(saved);
+
+        restTestClient.get().uri("/devices")
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody(DeviceDto[].class)
+                .value(devices -> assertThat(devices)
+                        .containsExactlyInAnyOrderElementsOf(saved.stream().map(DeviceDto::from).toList()));
+
+        verify(service).getAll();
+    }
+
+    @Test
+    void listsNoDevicesOverHttp() {
+        when(service.getAll()).thenReturn(List.of());
+
+        restTestClient.get().uri("/devices")
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody().json("[]");
+
+        verify(service).getAll();
+    }
 
     @ParameterizedTest
     @CsvSource({"available, AVAILABLE", "in-use, IN_USE", "inactive, INACTIVE"})

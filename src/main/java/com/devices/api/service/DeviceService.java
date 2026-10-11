@@ -5,6 +5,8 @@ import com.devices.api.domain.DeviceState;
 import com.devices.api.persistence.DeviceRepository;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class DeviceService {
 
@@ -20,5 +22,9 @@ public class DeviceService {
 
     public Device getById(Long id) {
         return repository.findById(id).orElseThrow(() -> new DeviceNotFoundException(id));
+    }
+
+    public List<Device> getAll() {
+        return repository.findAll();
     }
 }

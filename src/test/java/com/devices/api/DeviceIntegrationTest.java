@@ -18,6 +18,7 @@ import org.springframework.test.web.servlet.client.RestTestClient;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.ArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -37,6 +38,38 @@ class DeviceIntegrationTest {
     @BeforeEach
     void clearDevices() {
         repository.deleteAll();
+    }
+
+    @Test
+    void listsAllCreatedDevices() {
+        var created = new ArrayList<DeviceDto>();
+        for (var state : DeviceState.values()) {
+            var device = restTestClient.post().uri("/devices")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(new DeviceDto(null, "Device " + state, "Brand " + state, state, null))
+                    .exchange()
+                    .expectStatus().isCreated()
+                    .expectBody(DeviceDto.class)
+                    .returnResult().getResponseBody();
+            assertThat(device).isNotNull();
+            created.add(device);
+        }
+
+        restTestClient.get().uri("/devices")
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody(DeviceDto[].class)
+                .value(devices -> assertThat(devices).containsExactlyInAnyOrderElementsOf(created));
+    }
+
+    @Test
+    void listsNoDevicesWhenDatabaseIsEmpty() {
+        restTestClient.get().uri("/devices")
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody().json("[]");
     }
 
     @ParameterizedTest

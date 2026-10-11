@@ -11,6 +11,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,6 +29,26 @@ class DeviceServiceTest {
 
     @InjectMocks
     private DeviceService service;
+
+    @Test
+    void listsDevicesAndReturnsRepositoryResult() {
+        var saved = List.of(
+                new Device("Phone", "Brand", DeviceState.AVAILABLE),
+                new Device("Tablet", "Other", DeviceState.IN_USE),
+                new Device("Watch", "Brand", DeviceState.INACTIVE));
+        when(repository.findAll()).thenReturn(saved);
+
+        assertThat(service.getAll()).isSameAs(saved);
+        verify(repository).findAll();
+    }
+
+    @Test
+    void listsNoDevicesWhenRepositoryIsEmpty() {
+        when(repository.findAll()).thenReturn(List.of());
+
+        assertThat(service.getAll()).isEmpty();
+        verify(repository).findAll();
+    }
 
     @ParameterizedTest
     @EnumSource(DeviceState.class)
