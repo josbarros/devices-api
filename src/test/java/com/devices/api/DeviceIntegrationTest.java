@@ -40,6 +40,33 @@ class DeviceIntegrationTest {
         repository.deleteAll();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"Brand", "brand", " Brand ", "Missing", ""})
+    void listsCreatedDevicesByExactBrand(String brand) {
+        var created = new ArrayList<DeviceDto>();
+        var brands = new String[]{"Brand", "Brand", "brand", " Brand "};
+        for (int index = 0; index < brands.length; index++) {
+            var device = restTestClient.post().uri("/devices")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(new DeviceDto(null, "Device " + index, brands[index],
+                            DeviceState.values()[index % DeviceState.values().length], null))
+                    .exchange()
+                    .expectStatus().isCreated()
+                    .expectBody(DeviceDto.class)
+                    .returnResult().getResponseBody();
+            assertThat(device).isNotNull();
+            created.add(device);
+        }
+        var expected = created.stream().filter(device -> device.brand().equals(brand)).toList();
+
+        restTestClient.get().uri(builder -> builder.path("/devices").queryParam("brand", brand).build())
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody(DeviceDto[].class)
+                .value(devices -> assertThat(devices).containsExactlyInAnyOrderElementsOf(expected));
+    }
+
     @Test
     void listsAllCreatedDevices() {
         var created = new ArrayList<DeviceDto>();

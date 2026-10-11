@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -29,6 +30,24 @@ class DeviceServiceTest {
 
     @InjectMocks
     private DeviceService service;
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Brand", "brand", " Brand ", ""})
+    void listsDevicesByBrandAndReturnsRepositoryResult(String brand) {
+        var saved = List.of(new Device("Phone", brand, DeviceState.AVAILABLE));
+        when(repository.findByBrand(brand)).thenReturn(saved);
+
+        assertThat(service.getAll(brand)).isSameAs(saved);
+        verify(repository).findByBrand(brand);
+    }
+
+    @Test
+    void listsNoDevicesWhenBrandHasNoMatches() {
+        when(repository.findByBrand("Missing")).thenReturn(List.of());
+
+        assertThat(service.getAll("Missing")).isEmpty();
+        verify(repository).findByBrand("Missing");
+    }
 
     @Test
     void listsDevicesAndReturnsRepositoryResult() {

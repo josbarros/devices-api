@@ -41,6 +41,37 @@ class DeviceControllerTest {
     @MockitoBean
     private DeviceService service;
 
+    @ParameterizedTest
+    @ValueSource(strings = {"Brand", "brand", " Brand ", ""})
+    void listsDevicesByBrandOverHttp(String brand) {
+        var saved = new Device("Phone", brand, DeviceState.AVAILABLE);
+        ReflectionTestUtils.setField(saved, "id", 42L);
+        ReflectionTestUtils.setField(saved, "creationTime", Instant.parse("2026-10-11T10:00:00Z"));
+        when(service.getAll(brand)).thenReturn(List.of(saved));
+
+        restTestClient.get().uri(builder -> builder.path("/devices").queryParam("brand", brand).build())
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody(DeviceDto[].class)
+                .value(devices -> assertThat(devices).containsExactly(DeviceDto.from(saved)));
+
+        verify(service).getAll(brand);
+    }
+
+    @Test
+    void listsNoDevicesWhenBrandHasNoMatchesOverHttp() {
+        when(service.getAll("Missing")).thenReturn(List.of());
+
+        restTestClient.get().uri("/devices?brand=Missing")
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody().json("[]");
+
+        verify(service).getAll("Missing");
+    }
+
     @Test
     void listsDevicesOverHttp() {
         var saved = List.of(

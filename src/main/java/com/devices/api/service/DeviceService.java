@@ -27,4 +27,8 @@ public class DeviceService {
     public List<Device> getAll() {
         return repository.findAll();
     }
+
+    public List<Device> getAll(String brand) {
+        return repository.findByBrand(brand);
+    }
 }
