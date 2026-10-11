@@ -29,7 +29,7 @@ public class DeviceService {
     public Device update(Long id, String name, String brand, DeviceState state) {
         var device = getById(id);
         device.update(name, brand, state);
-        return device;
+        return repository.save(device);
     }
 
     @Transactional

@@ -38,17 +38,20 @@ class DeviceServiceTest {
     @CsvSource({"AVAILABLE, AVAILABLE", "AVAILABLE, IN_USE", "AVAILABLE, INACTIVE",
             "INACTIVE, AVAILABLE", "INACTIVE, IN_USE", "INACTIVE, INACTIVE",
             "IN_USE, AVAILABLE", "IN_USE, INACTIVE"})
-    void updatesLoadedDevice(DeviceState previous, DeviceState next) {
+    void updatesLoadedDeviceAndReturnsRepositoryResult(DeviceState previous, DeviceState next) {
         var saved = new Device("Phone", "Brand", previous);
+        var repositoryResult = new Device(" Tablet ", " Other ", next);
         when(repository.findById(42L)).thenReturn(Optional.of(saved));
+        when(repository.save(saved)).thenReturn(repositoryResult);
 
         var updated = service.update(42L, " Tablet ", " Other ", next);
 
-        assertThat(updated).isSameAs(saved);
-        assertThat(updated.getName()).isEqualTo(" Tablet ");
-        assertThat(updated.getBrand()).isEqualTo(" Other ");
-        assertThat(updated.getState()).isEqualTo(next);
+        assertThat(updated).isSameAs(repositoryResult);
+        assertThat(saved.getName()).isEqualTo(" Tablet ");
+        assertThat(saved.getBrand()).isEqualTo(" Other ");
+        assertThat(saved.getState()).isEqualTo(next);
         verify(repository).findById(42L);
+        verify(repository).save(saved);
         verifyNoMoreInteractions(repository);
     }
 
@@ -56,10 +59,12 @@ class DeviceServiceTest {
     void permitsUnchangedInUseDevice() {
         var saved = new Device("Phone", "Brand", DeviceState.IN_USE);
         when(repository.findById(42L)).thenReturn(Optional.of(saved));
+        when(repository.save(saved)).thenReturn(saved);
 
         assertThat(service.update(42L, "Phone", "Brand", DeviceState.IN_USE)).isSameAs(saved);
 
         verify(repository).findById(42L);
+        verify(repository).save(saved);
         verifyNoMoreInteractions(repository);
     }
 
