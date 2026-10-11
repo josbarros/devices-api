@@ -9,11 +9,13 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.Generated;
 import org.hibernate.generator.EventType;
 
 import java.time.Instant;
+import java.util.Objects;
 
 @Entity
 @Table(name = "devices")
@@ -23,6 +25,11 @@ public class Device {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(nullable = false, updatable = false)
     private Long id;
+
+    @Version
+    @ColumnDefault("0")
+    @Column(nullable = false)
+    private long version;
 
     @Column(nullable = false, check = @CheckConstraint(
             name = "device_name_not_blank",
@@ -54,6 +61,16 @@ public class Device {
 
     public Long getId() {
         return id;
+    }
+
+    public void update(String name, String brand, DeviceState state) {
+        if (this.state == DeviceState.IN_USE && state == DeviceState.IN_USE
+                && (!Objects.equals(this.name, name) || !Objects.equals(this.brand, brand))) {
+            throw new DeviceUpdateNotAllowedException();
+        }
+        this.name = name;
+        this.brand = brand;
+        this.state = state;
     }
 
     public String getName() {

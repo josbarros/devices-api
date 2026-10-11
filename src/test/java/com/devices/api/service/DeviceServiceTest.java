@@ -2,6 +2,7 @@ package com.devices.api.service;
 
 import com.devices.api.domain.Device;
 import com.devices.api.domain.DeviceState;
+import com.devices.api.domain.DeviceUpdateNotAllowedException;
 import com.devices.api.persistence.DeviceRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,6 +33,61 @@ class DeviceServiceTest {
 
     @InjectMocks
     private DeviceService service;
+
+    @ParameterizedTest
+    @CsvSource({"AVAILABLE, AVAILABLE", "AVAILABLE, IN_USE", "AVAILABLE, INACTIVE",
+            "INACTIVE, AVAILABLE", "INACTIVE, IN_USE", "INACTIVE, INACTIVE",
+            "IN_USE, AVAILABLE", "IN_USE, INACTIVE"})
+    void updatesLoadedDevice(DeviceState previous, DeviceState next) {
+        var saved = new Device("Phone", "Brand", previous);
+        when(repository.findById(42L)).thenReturn(Optional.of(saved));
+
+        var updated = service.update(42L, " Tablet ", " Other ", next);
+
+        assertThat(updated).isSameAs(saved);
+        assertThat(updated.getName()).isEqualTo(" Tablet ");
+        assertThat(updated.getBrand()).isEqualTo(" Other ");
+        assertThat(updated.getState()).isEqualTo(next);
+        verify(repository).findById(42L);
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test
+    void permitsUnchangedInUseDevice() {
+        var saved = new Device("Phone", "Brand", DeviceState.IN_USE);
+        when(repository.findById(42L)).thenReturn(Optional.of(saved));
+
+        assertThat(service.update(42L, "Phone", "Brand", DeviceState.IN_USE)).isSameAs(saved);
+
+        verify(repository).findById(42L);
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test
+    void propagatesDomainUpdateConflict() {
+        var saved = new Device("Phone", "Brand", DeviceState.IN_USE);
+        when(repository.findById(42L)).thenReturn(Optional.of(saved));
+
+        assertThatThrownBy(() -> service.update(42L, "Tablet", "Other", DeviceState.IN_USE))
+                .isInstanceOf(DeviceUpdateNotAllowedException.class);
+
+        assertThat(saved.getName()).isEqualTo("Phone");
+        assertThat(saved.getBrand()).isEqualTo("Brand");
+        verify(repository).findById(42L);
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test
+    void rejectsUpdateOfMissingDevice() {
+        when(repository.findById(42L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.update(42L, "Phone", "Brand", DeviceState.AVAILABLE))
+                .isInstanceOf(DeviceNotFoundException.class)
+                .hasMessage("Device 42 not found");
+
+        verify(repository).findById(42L);
+        verifyNoMoreInteractions(repository);
+    }
 
     @ParameterizedTest
     @EnumSource(value = DeviceState.class, names = {"AVAILABLE", "INACTIVE"})

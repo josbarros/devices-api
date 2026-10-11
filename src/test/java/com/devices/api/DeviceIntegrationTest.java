@@ -42,6 +42,146 @@ class DeviceIntegrationTest {
     }
 
     @ParameterizedTest
+    @CsvSource({"AVAILABLE, AVAILABLE", "AVAILABLE, IN_USE", "AVAILABLE, INACTIVE",
+            "INACTIVE, AVAILABLE", "INACTIVE, IN_USE", "INACTIVE, INACTIVE",
+            "IN_USE, AVAILABLE", "IN_USE, INACTIVE"})
+    void fullyUpdatesCreatedDeviceAndPreservesGeneratedFields(DeviceState previous, DeviceState next) {
+        var created = createDevice(previous);
+        var location = "/devices/" + created.id();
+        var expected = new DeviceDto(created.id(), " Tablet ", " Other ", next, created.creationTime());
+
+        restTestClient.put().uri(location)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, " Tablet ", " Other ", next, null))
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody(DeviceDto.class).isEqualTo(expected);
+
+        assertStoredDevice(expected);
+    }
+
+    @Test
+    void permitsFullUpdateWithUnchangedInUseValues() {
+        var created = createDevice(DeviceState.IN_USE);
+
+        restTestClient.put().uri("/devices/" + created.id())
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, created.name(), created.brand(), created.state(), null))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(DeviceDto.class).isEqualTo(created);
+
+        assertStoredDevice(created);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"Tablet, Brand", "Phone, Other", "Tablet, Other"})
+    void rejectsFullUpdateWhileInUseAndLeavesDeviceUnchanged(String name, String brand) {
+        var created = createDevice(DeviceState.IN_USE);
+        var location = "/devices/" + created.id();
+
+        restTestClient.put().uri(location)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, name, brand, DeviceState.IN_USE, null))
+                .exchange()
+                .expectStatus().isEqualTo(409)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(409)
+                .jsonPath("$.title").isEqualTo("Conflict")
+                .jsonPath("$.detail").isEqualTo("The name or brand of an in-use device cannot be changed")
+                .jsonPath("$.instance").isEqualTo(location);
+
+        assertStoredDevice(created);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{}", "null", "{",
+            "{\"brand\":\"Other\",\"state\":\"inactive\"}",
+            "{\"name\":\"Tablet\",\"state\":\"inactive\"}",
+            "{\"name\":\"Tablet\",\"brand\":\"Other\"}",
+            "{\"name\":null,\"brand\":\"Other\",\"state\":\"inactive\"}",
+            "{\"name\":\"Tablet\",\"brand\":null,\"state\":\"inactive\"}",
+            "{\"name\":\"Tablet\",\"brand\":\"Other\",\"state\":null}",
+            "{\"name\":\" \",\"brand\":\"Other\",\"state\":\"inactive\"}",
+            "{\"name\":\"Tablet\",\"brand\":\" \",\"state\":\"inactive\"}",
+            "{\"name\":\"Tablet\",\"brand\":\"Other\",\"state\":\"unknown\"}",
+            "{\"name\":\"Tablet\",\"brand\":\"Other\",\"state\":0}",
+            "{\"name\":\"Tablet\",\"brand\":\"Other\",\"state\":\"inactive\",\"extra\":true}",
+            "{\"name\":\"Tablet\",\"brand\":\"Other\",\"state\":\"inactive\",\"id\":123}",
+            "{\"name\":\"Tablet\",\"brand\":\"Other\",\"state\":\"inactive\",\"creationTime\":\"2020-01-01T00:00:00Z\"}"
+    })
+    void rejectsInvalidFullUpdateAndLeavesDeviceUnchanged(String body) {
+        var created = createDevice(DeviceState.AVAILABLE);
+        var location = "/devices/" + created.id();
+
+        restTestClient.put().uri(location)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(400)
+                .jsonPath("$.title").isEqualTo("Bad Request")
+                .jsonPath("$.instance").isEqualTo(location);
+
+        assertStoredDevice(created);
+    }
+
+    @Test
+    void returnsProblemDetailsForMissingDeviceUpdate() {
+        restTestClient.put().uri("/devices/42")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, "Tablet", "Other", DeviceState.AVAILABLE, null))
+                .exchange()
+                .expectStatus().isNotFound()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(404)
+                .jsonPath("$.detail").isEqualTo("Device 42 not found")
+                .jsonPath("$.instance").isEqualTo("/devices/42");
+
+        assertThat(repository.count()).isZero();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not-an-id", "9223372036854775808"})
+    void rejectsInvalidFullUpdateId(String id) {
+        restTestClient.put().uri("/devices/" + id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, "Tablet", "Other", DeviceState.AVAILABLE, null))
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON);
+
+        assertThat(repository.count()).isZero();
+    }
+
+    private DeviceDto createDevice(DeviceState state) {
+        var created = restTestClient.post().uri("/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, "Phone", "Brand", state, null))
+                .exchange()
+                .expectStatus().isCreated()
+                .expectBody(DeviceDto.class)
+                .returnResult().getResponseBody();
+        assertThat(created).isNotNull();
+        return created;
+    }
+
+    private void assertStoredDevice(DeviceDto expected) {
+        assertThat(repository.count()).isEqualTo(1);
+        assertThat(repository.findById(expected.id()).map(DeviceDto::from)).contains(expected);
+        restTestClient.get().uri("/devices/" + expected.id())
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(DeviceDto.class).isEqualTo(expected);
+    }
+
+    @ParameterizedTest
     @EnumSource(value = DeviceState.class, names = {"AVAILABLE", "INACTIVE"})
     void deletesEligibleCreatedDevice(DeviceState state) {
         var created = restTestClient.post().uri("/devices")

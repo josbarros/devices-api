@@ -10,6 +10,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.time.Instant;
@@ -24,6 +25,45 @@ class DeviceRepositoryTest {
 
     @Autowired
     private DeviceRepository repository;
+
+    @ParameterizedTest
+    @EnumSource(DeviceState.class)
+    void persistsUpdatedValuesAndPreservesGeneratedFields(DeviceState state) {
+        var saved = repository.saveAndFlush(new Device("Phone", "Brand", DeviceState.AVAILABLE));
+        var id = saved.getId();
+        var creationTime = saved.getCreationTime();
+        var loaded = repository.findById(id).orElseThrow();
+
+        loaded.update(" Tablet ", " Other ", state);
+        repository.saveAndFlush(loaded);
+
+        var updated = repository.findById(id).orElseThrow();
+        assertThat(updated.getName()).isEqualTo(" Tablet ");
+        assertThat(updated.getBrand()).isEqualTo(" Other ");
+        assertThat(updated.getState()).isEqualTo(state);
+        assertThat(updated.getId()).isEqualTo(id);
+        assertThat(updated.getCreationTime()).isEqualTo(creationTime);
+    }
+
+    @Test
+    void rejectsStaleUpdatesAndDeletionAfterDeviceBecomesInUse() {
+        var saved = repository.saveAndFlush(new Device("Phone", "Brand", DeviceState.AVAILABLE));
+        var current = repository.findById(saved.getId()).orElseThrow();
+        var stale = repository.findById(saved.getId()).orElseThrow();
+        current.update("Phone", "Brand", DeviceState.IN_USE);
+        repository.saveAndFlush(current);
+
+        stale.update("Tablet", "Other", DeviceState.AVAILABLE);
+
+        assertThatThrownBy(() -> repository.saveAndFlush(stale))
+                .isInstanceOf(OptimisticLockingFailureException.class);
+        assertThatThrownBy(() -> repository.delete(stale))
+                .isInstanceOf(OptimisticLockingFailureException.class);
+        var retained = repository.findById(saved.getId()).orElseThrow();
+        assertThat(retained.getName()).isEqualTo("Phone");
+        assertThat(retained.getBrand()).isEqualTo("Brand");
+        assertThat(retained.getState()).isEqualTo(DeviceState.IN_USE);
+    }
 
     @ParameterizedTest
     @EnumSource(DeviceState.class)

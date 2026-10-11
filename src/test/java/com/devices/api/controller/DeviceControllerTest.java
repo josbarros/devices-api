@@ -3,6 +3,7 @@ package com.devices.api.controller;
 import com.devices.api.DevicesApiApplication;
 import com.devices.api.domain.Device;
 import com.devices.api.domain.DeviceState;
+import com.devices.api.domain.DeviceUpdateNotAllowedException;
 import com.devices.api.service.DeviceInUseException;
 import com.devices.api.service.DeviceNotFoundException;
 import com.devices.api.service.DeviceService;
@@ -13,6 +14,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
@@ -42,6 +44,127 @@ class DeviceControllerTest {
 
     @MockitoBean
     private DeviceService service;
+
+    @ParameterizedTest
+    @CsvSource({"available, AVAILABLE", "in-use, IN_USE", "inactive, INACTIVE"})
+    void updatesDeviceOverHttp(String state, DeviceState domainState) {
+        var updated = new Device(" Tablet ", " Other ", domainState);
+        ReflectionTestUtils.setField(updated, "id", 42L);
+        ReflectionTestUtils.setField(updated, "creationTime", Instant.parse("2026-10-11T10:00:00Z"));
+        when(service.update(42L, " Tablet ", " Other ", domainState)).thenReturn(updated);
+
+        restTestClient.put().uri("/devices/42")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("""
+                        {"name":" Tablet ","brand":" Other ","state":"%s"}
+                        """.formatted(state))
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody(DeviceDto.class).isEqualTo(DeviceDto.from(updated));
+
+        verify(service).update(42L, " Tablet ", " Other ", domainState);
+    }
+
+    @Test
+    void returnsProblemDetailsForMissingDeviceUpdateOverHttp() {
+        when(service.update(42L, "Tablet", "Other", DeviceState.AVAILABLE))
+                .thenThrow(new DeviceNotFoundException(42L));
+
+        restTestClient.put().uri("/devices/42")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, "Tablet", "Other", DeviceState.AVAILABLE, null))
+                .exchange()
+                .expectStatus().isNotFound()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(404)
+                .jsonPath("$.detail").isEqualTo("Device 42 not found")
+                .jsonPath("$.instance").isEqualTo("/devices/42");
+    }
+
+    @Test
+    void returnsProblemDetailsForDomainUpdateConflictOverHttp() {
+        when(service.update(42L, "Tablet", "Other", DeviceState.IN_USE))
+                .thenThrow(new DeviceUpdateNotAllowedException());
+
+        restTestClient.put().uri("/devices/42")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, "Tablet", "Other", DeviceState.IN_USE, null))
+                .exchange()
+                .expectStatus().isEqualTo(409)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(409)
+                .jsonPath("$.title").isEqualTo("Conflict")
+                .jsonPath("$.detail").isEqualTo("The name or brand of an in-use device cannot be changed")
+                .jsonPath("$.instance").isEqualTo("/devices/42");
+    }
+
+    @Test
+    void returnsProblemDetailsForConcurrentUpdateOverHttp() {
+        when(service.update(42L, "Tablet", "Other", DeviceState.AVAILABLE))
+                .thenThrow(new OptimisticLockingFailureException("Internal persistence details"));
+
+        restTestClient.put().uri("/devices/42")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, "Tablet", "Other", DeviceState.AVAILABLE, null))
+                .exchange()
+                .expectStatus().isEqualTo(409)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(409)
+                .jsonPath("$.title").isEqualTo("Conflict")
+                .jsonPath("$.detail").isEqualTo("Device was changed by another request; retry with its current values")
+                .jsonPath("$.instance").isEqualTo("/devices/42");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not-an-id", "9223372036854775808"})
+    void rejectsInvalidUpdateIdBeforeCallingService(String id) {
+        restTestClient.put().uri("/devices/" + id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, "Tablet", "Other", DeviceState.AVAILABLE, null))
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON);
+
+        verifyNoInteractions(service);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{}", "null", "{",
+            "{\"brand\":\"Brand\",\"state\":\"available\"}",
+            "{\"name\":null,\"brand\":\"Brand\",\"state\":\"available\"}",
+            "{\"name\":\" \",\"brand\":\"Brand\",\"state\":\"available\"}",
+            "{\"name\":\"Phone\",\"state\":\"available\"}",
+            "{\"name\":\"Phone\",\"brand\":null,\"state\":\"available\"}",
+            "{\"name\":\"Phone\",\"brand\":\" \",\"state\":\"available\"}",
+            "{\"name\":\"Phone\",\"brand\":\"Brand\"}",
+            "{\"name\":\"Phone\",\"brand\":\"Brand\",\"state\":null}",
+            "{\"name\":\"Phone\",\"brand\":\"Brand\",\"state\":\"unknown\"}",
+            "{\"name\":\"Phone\",\"brand\":\"Brand\",\"state\":\"IN_USE\"}",
+            "{\"name\":\"Phone\",\"brand\":\"Brand\",\"state\":0}",
+            "{\"name\":\"Phone\",\"brand\":\"Brand\",\"state\":\"available\",\"extra\":true}",
+            "{\"name\":\"Phone\",\"brand\":\"Brand\",\"state\":\"available\",\"id\":123}",
+            "{\"name\":\"Phone\",\"brand\":\"Brand\",\"state\":\"available\",\"creationTime\":\"2020-01-01T00:00:00Z\"}"
+    })
+    void rejectsInvalidUpdateBeforeCallingService(String body) {
+        restTestClient.put().uri("/devices/42")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(400)
+                .jsonPath("$.title").isEqualTo("Bad Request")
+                .jsonPath("$.detail").isNotEmpty()
+                .jsonPath("$.instance").isEqualTo("/devices/42");
+
+        verifyNoInteractions(service);
+    }
 
     @Test
     void deletesDeviceOverHttp() {

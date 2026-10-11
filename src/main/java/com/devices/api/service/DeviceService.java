@@ -26,6 +26,13 @@ public class DeviceService {
     }
 
     @Transactional
+    public Device update(Long id, String name, String brand, DeviceState state) {
+        var device = getById(id);
+        device.update(name, brand, state);
+        return device;
+    }
+
+    @Transactional
     public void delete(Long id) {
         var device = getById(id);
         if (device.getState() == DeviceState.IN_USE) {
