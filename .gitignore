@@ -8,3 +8,6 @@ build/
 *.sqlite3-*
 .idea/
 *.iml
+*.md
+*.pdf
+
