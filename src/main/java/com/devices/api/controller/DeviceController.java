@@ -1,5 +1,6 @@
 package com.devices.api.controller;
 
+import com.devices.api.domain.DeviceState;
 import com.devices.api.service.DeviceService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -25,13 +26,9 @@ public class DeviceController {
     }
 
     @GetMapping
-    public List<DeviceDto> getAll() {
-        return service.getAll().stream().map(DeviceDto::from).toList();
-    }
-
-    @GetMapping(params = "brand")
-    public List<DeviceDto> getByBrand(@RequestParam String brand) {
-        return service.getAll(brand).stream().map(DeviceDto::from).toList();
+    public List<DeviceDto> getAll(@RequestParam(required = false) String brand,
+                                 @RequestParam(required = false) DeviceState state) {
+        return service.getAll(brand, state).stream().map(DeviceDto::from).toList();
     }
 
     @GetMapping("/{id}")

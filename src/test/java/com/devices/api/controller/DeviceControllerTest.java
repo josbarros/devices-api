@@ -42,12 +42,102 @@ class DeviceControllerTest {
     private DeviceService service;
 
     @ParameterizedTest
+    @CsvSource({"available, AVAILABLE", "in-use, IN_USE", "inactive, INACTIVE"})
+    void listsDevicesByStateOverHttp(String state, DeviceState domainState) {
+        var saved = new Device("Phone", "Brand", domainState);
+        ReflectionTestUtils.setField(saved, "id", 42L);
+        ReflectionTestUtils.setField(saved, "creationTime", Instant.parse("2026-10-11T10:00:00Z"));
+        when(service.getAll(null, domainState)).thenReturn(List.of(saved));
+
+        restTestClient.get().uri(builder -> builder.path("/devices").queryParam("state", state).build())
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody(DeviceDto[].class)
+                .value(devices -> assertThat(devices).containsExactly(DeviceDto.from(saved)));
+
+        verify(service).getAll(null, domainState);
+    }
+
+    @Test
+    void listsNoDevicesWhenStateHasNoMatchesOverHttp() {
+        when(service.getAll(null, DeviceState.INACTIVE)).thenReturn(List.of());
+
+        restTestClient.get().uri("/devices?state=inactive")
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody().json("[]");
+
+        verify(service).getAll(null, DeviceState.INACTIVE);
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {"Brand|available|AVAILABLE", "brand|in-use|IN_USE", " Brand |inactive|INACTIVE",
+            "''|available|AVAILABLE"},
+            delimiter = '|', ignoreLeadingAndTrailingWhitespace = false, emptyValue = "")
+    void listsDevicesByBrandAndStateOverHttp(String brand, String state, DeviceState domainState) {
+        var saved = new Device("Phone", brand, domainState);
+        ReflectionTestUtils.setField(saved, "id", 42L);
+        ReflectionTestUtils.setField(saved, "creationTime", Instant.parse("2026-10-11T10:00:00Z"));
+        when(service.getAll(brand, domainState)).thenReturn(List.of(saved));
+
+        restTestClient.get().uri(builder -> builder.path("/devices")
+                        .queryParam("brand", brand).queryParam("state", state).build())
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody(DeviceDto[].class)
+                .value(devices -> assertThat(devices).containsExactly(DeviceDto.from(saved)));
+
+        verify(service).getAll(brand, domainState);
+    }
+
+    @Test
+    void listsNoDevicesWhenBrandAndStateHaveNoMatchesOverHttp() {
+        when(service.getAll("Missing", DeviceState.AVAILABLE)).thenReturn(List.of());
+
+        restTestClient.get().uri("/devices?brand=Missing&state=available")
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody().json("[]");
+
+        verify(service).getAll("Missing", DeviceState.AVAILABLE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"unknown", "AVAILABLE", "IN_USE", "in_use", "0", "true", "", " ",
+            " available "})
+    void rejectsInvalidStateBeforeCallingService(String state) {
+        for (var includeBrand : new boolean[]{false, true}) {
+            restTestClient.get().uri(builder -> {
+                        builder.path("/devices").queryParam("state", state);
+                        if (includeBrand) {
+                            builder.queryParam("brand", "Brand");
+                        }
+                        return builder.build();
+                    })
+                    .exchange()
+                    .expectStatus().isBadRequest()
+                    .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                    .expectBody()
+                    .jsonPath("$.status").isEqualTo(400)
+                    .jsonPath("$.title").isEqualTo("Bad Request")
+                    .jsonPath("$.detail").isNotEmpty()
+                    .jsonPath("$.instance").isEqualTo("/devices");
+        }
+
+        verifyNoInteractions(service);
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"Brand", "brand", " Brand ", ""})
     void listsDevicesByBrandOverHttp(String brand) {
         var saved = new Device("Phone", brand, DeviceState.AVAILABLE);
         ReflectionTestUtils.setField(saved, "id", 42L);
         ReflectionTestUtils.setField(saved, "creationTime", Instant.parse("2026-10-11T10:00:00Z"));
-        when(service.getAll(brand)).thenReturn(List.of(saved));
+        when(service.getAll(brand, null)).thenReturn(List.of(saved));
 
         restTestClient.get().uri(builder -> builder.path("/devices").queryParam("brand", brand).build())
                 .exchange()
@@ -56,12 +146,12 @@ class DeviceControllerTest {
                 .expectBody(DeviceDto[].class)
                 .value(devices -> assertThat(devices).containsExactly(DeviceDto.from(saved)));
 
-        verify(service).getAll(brand);
+        verify(service).getAll(brand, null);
     }
 
     @Test
     void listsNoDevicesWhenBrandHasNoMatchesOverHttp() {
-        when(service.getAll("Missing")).thenReturn(List.of());
+        when(service.getAll("Missing", null)).thenReturn(List.of());
 
         restTestClient.get().uri("/devices?brand=Missing")
                 .exchange()
@@ -69,7 +159,7 @@ class DeviceControllerTest {
                 .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
                 .expectBody().json("[]");
 
-        verify(service).getAll("Missing");
+        verify(service).getAll("Missing", null);
     }
 
     @Test
@@ -82,7 +172,7 @@ class DeviceControllerTest {
             ReflectionTestUtils.setField(saved.get(index), "id", (long) index + 1);
             ReflectionTestUtils.setField(saved.get(index), "creationTime", Instant.parse("2026-10-11T10:00:00Z"));
         }
-        when(service.getAll()).thenReturn(saved);
+        when(service.getAll(null, null)).thenReturn(saved);
 
         restTestClient.get().uri("/devices")
                 .exchange()
@@ -92,12 +182,12 @@ class DeviceControllerTest {
                 .value(devices -> assertThat(devices)
                         .containsExactlyInAnyOrderElementsOf(saved.stream().map(DeviceDto::from).toList()));
 
-        verify(service).getAll();
+        verify(service).getAll(null, null);
     }
 
     @Test
     void listsNoDevicesOverHttp() {
-        when(service.getAll()).thenReturn(List.of());
+        when(service.getAll(null, null)).thenReturn(List.of());
 
         restTestClient.get().uri("/devices")
                 .exchange()
@@ -105,7 +195,7 @@ class DeviceControllerTest {
                 .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
                 .expectBody().json("[]");
 
-        verify(service).getAll();
+        verify(service).getAll(null, null);
     }
 
     @ParameterizedTest

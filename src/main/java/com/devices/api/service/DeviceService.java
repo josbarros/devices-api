@@ -24,11 +24,16 @@ public class DeviceService {
         return repository.findById(id).orElseThrow(() -> new DeviceNotFoundException(id));
     }
 
-    public List<Device> getAll() {
-        return repository.findAll();
-    }
-
-    public List<Device> getAll(String brand) {
-        return repository.findByBrand(brand);
+    public List<Device> getAll(String brand, DeviceState state) {
+        if (brand == null && state == null) {
+            return repository.findAll();
+        }
+        if (state == null) {
+            return repository.findByBrand(brand);
+        }
+        if (brand == null) {
+            return repository.findByState(state);
+        }
+        return repository.findByBrandAndState(brand, state);
     }
 }

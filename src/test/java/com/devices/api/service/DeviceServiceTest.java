@@ -6,6 +6,7 @@ import com.devices.api.persistence.DeviceRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
@@ -32,12 +33,49 @@ class DeviceServiceTest {
     private DeviceService service;
 
     @ParameterizedTest
+    @EnumSource(DeviceState.class)
+    void listsDevicesByStateAndReturnsRepositoryResult(DeviceState state) {
+        var saved = List.of(new Device("Phone", "Brand", state));
+        when(repository.findByState(state)).thenReturn(saved);
+
+        assertThat(service.getAll(null, state)).isSameAs(saved);
+        verify(repository).findByState(state);
+    }
+
+    @Test
+    void listsNoDevicesWhenStateHasNoMatches() {
+        when(repository.findByState(DeviceState.INACTIVE)).thenReturn(List.of());
+
+        assertThat(service.getAll(null, DeviceState.INACTIVE)).isEmpty();
+        verify(repository).findByState(DeviceState.INACTIVE);
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {"Brand|AVAILABLE", "brand|IN_USE", " Brand |INACTIVE", "''|AVAILABLE"},
+            delimiter = '|', ignoreLeadingAndTrailingWhitespace = false, emptyValue = "")
+    void listsDevicesByBrandAndStateAndReturnsRepositoryResult(String brand, DeviceState state) {
+        var saved = List.of(new Device("Phone", brand, state));
+        when(repository.findByBrandAndState(brand, state)).thenReturn(saved);
+
+        assertThat(service.getAll(brand, state)).isSameAs(saved);
+        verify(repository).findByBrandAndState(brand, state);
+    }
+
+    @Test
+    void listsNoDevicesWhenBrandAndStateHaveNoMatches() {
+        when(repository.findByBrandAndState("Missing", DeviceState.AVAILABLE)).thenReturn(List.of());
+
+        assertThat(service.getAll("Missing", DeviceState.AVAILABLE)).isEmpty();
+        verify(repository).findByBrandAndState("Missing", DeviceState.AVAILABLE);
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"Brand", "brand", " Brand ", ""})
     void listsDevicesByBrandAndReturnsRepositoryResult(String brand) {
         var saved = List.of(new Device("Phone", brand, DeviceState.AVAILABLE));
         when(repository.findByBrand(brand)).thenReturn(saved);
 
-        assertThat(service.getAll(brand)).isSameAs(saved);
+        assertThat(service.getAll(brand, null)).isSameAs(saved);
         verify(repository).findByBrand(brand);
     }
 
@@ -45,7 +83,7 @@ class DeviceServiceTest {
     void listsNoDevicesWhenBrandHasNoMatches() {
         when(repository.findByBrand("Missing")).thenReturn(List.of());
 
-        assertThat(service.getAll("Missing")).isEmpty();
+        assertThat(service.getAll("Missing", null)).isEmpty();
         verify(repository).findByBrand("Missing");
     }
 
@@ -57,7 +95,7 @@ class DeviceServiceTest {
                 new Device("Watch", "Brand", DeviceState.INACTIVE));
         when(repository.findAll()).thenReturn(saved);
 
-        assertThat(service.getAll()).isSameAs(saved);
+        assertThat(service.getAll(null, null)).isSameAs(saved);
         verify(repository).findAll();
     }
 
@@ -65,7 +103,7 @@ class DeviceServiceTest {
     void listsNoDevicesWhenRepositoryIsEmpty() {
         when(repository.findAll()).thenReturn(List.of());
 
-        assertThat(service.getAll()).isEmpty();
+        assertThat(service.getAll(null, null)).isEmpty();
         verify(repository).findAll();
     }
 

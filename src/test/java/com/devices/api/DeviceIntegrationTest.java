@@ -41,6 +41,85 @@ class DeviceIntegrationTest {
     }
 
     @ParameterizedTest
+    @CsvSource({"available, AVAILABLE", "in-use, IN_USE", "inactive, INACTIVE"})
+    void listsCreatedDevicesByStateAndByBrandAndState(String state, DeviceState domainState) {
+        var created = new ArrayList<DeviceDto>();
+        for (var brand : new String[]{"Brand", "brand", " Brand "}) {
+            for (var deviceState : DeviceState.values()) {
+                var device = restTestClient.post().uri("/devices")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(new DeviceDto(null, "Device " + created.size(), brand, deviceState, null))
+                        .exchange()
+                        .expectStatus().isCreated()
+                        .expectBody(DeviceDto.class)
+                        .returnResult().getResponseBody();
+                assertThat(device).isNotNull();
+                created.add(device);
+            }
+        }
+        var expectedByState = created.stream().filter(device -> device.state() == domainState).toList();
+
+        restTestClient.get().uri(builder -> builder.path("/devices").queryParam("state", state).build())
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody(DeviceDto[].class)
+                .value(devices -> assertThat(devices).containsExactlyInAnyOrderElementsOf(expectedByState));
+
+        for (var brand : new String[]{"Brand", "brand", " Brand ", "Missing", ""}) {
+            var expected = expectedByState.stream().filter(device -> device.brand().equals(brand)).toList();
+
+            restTestClient.get().uri(builder -> builder.path("/devices")
+                            .queryParam("brand", brand).queryParam("state", state).build())
+                    .exchange()
+                    .expectStatus().isOk()
+                    .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                    .expectBody(DeviceDto[].class)
+                    .value(devices -> assertThat(devices).containsExactlyInAnyOrderElementsOf(expected));
+        }
+    }
+
+    @Test
+    void listsNoDevicesWhenStateHasNoMatches() {
+        restTestClient.post().uri("/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, "Phone", "Brand", DeviceState.AVAILABLE, null))
+                .exchange()
+                .expectStatus().isCreated();
+
+        for (var uri : new String[]{"/devices?state=inactive", "/devices?brand=Brand&state=inactive"}) {
+            restTestClient.get().uri(uri)
+                    .exchange()
+                    .expectStatus().isOk()
+                    .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                    .expectBody().json("[]");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"unknown", "AVAILABLE", "IN_USE", "in_use", "0", "true", "", " ",
+            " available "})
+    void rejectsInvalidStateFilters(String state) {
+        for (var includeBrand : new boolean[]{false, true}) {
+            restTestClient.get().uri(builder -> {
+                        builder.path("/devices").queryParam("state", state);
+                        if (includeBrand) {
+                            builder.queryParam("brand", "Brand");
+                        }
+                        return builder.build();
+                    })
+                    .exchange()
+                    .expectStatus().isBadRequest()
+                    .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                    .expectBody()
+                    .jsonPath("$.status").isEqualTo(400)
+                    .jsonPath("$.title").isEqualTo("Bad Request")
+                    .jsonPath("$.detail").isNotEmpty()
+                    .jsonPath("$.instance").isEqualTo("/devices");
+        }
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"Brand", "brand", " Brand ", "Missing", ""})
     void listsCreatedDevicesByExactBrand(String brand) {
         var created = new ArrayList<DeviceDto>();
