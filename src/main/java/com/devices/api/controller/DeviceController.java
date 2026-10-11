@@ -4,6 +4,7 @@ import com.devices.api.domain.DeviceState;
 import com.devices.api.service.DeviceService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -34,6 +35,12 @@ public class DeviceController {
     @GetMapping("/{id}")
     public DeviceDto getById(@PathVariable Long id) {
         return DeviceDto.from(service.getById(id));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        service.delete(id);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping

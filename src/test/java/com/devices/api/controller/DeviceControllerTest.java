@@ -3,6 +3,7 @@ package com.devices.api.controller;
 import com.devices.api.DevicesApiApplication;
 import com.devices.api.domain.Device;
 import com.devices.api.domain.DeviceState;
+import com.devices.api.service.DeviceInUseException;
 import com.devices.api.service.DeviceNotFoundException;
 import com.devices.api.service.DeviceService;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -40,6 +42,65 @@ class DeviceControllerTest {
 
     @MockitoBean
     private DeviceService service;
+
+    @Test
+    void deletesDeviceOverHttp() {
+        restTestClient.delete().uri("/devices/42")
+                .exchange()
+                .expectStatus().isNoContent()
+                .expectBody().isEmpty();
+
+        verify(service).delete(42L);
+    }
+
+    @Test
+    void returnsProblemDetailsForInUseDeviceDeletionOverHttp() {
+        doThrow(new DeviceInUseException(42L)).when(service).delete(42L);
+
+        restTestClient.delete().uri("/devices/42")
+                .exchange()
+                .expectStatus().isEqualTo(409)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(409)
+                .jsonPath("$.title").isEqualTo("Conflict")
+                .jsonPath("$.detail").isEqualTo("Device 42 is in use and cannot be deleted")
+                .jsonPath("$.instance").isEqualTo("/devices/42");
+
+        verify(service).delete(42L);
+    }
+
+    @Test
+    void returnsProblemDetailsForMissingDeviceDeletionOverHttp() {
+        doThrow(new DeviceNotFoundException(42L)).when(service).delete(42L);
+
+        restTestClient.delete().uri("/devices/42")
+                .exchange()
+                .expectStatus().isNotFound()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(404)
+                .jsonPath("$.title").isEqualTo("Not Found")
+                .jsonPath("$.detail").isEqualTo("Device 42 not found")
+                .jsonPath("$.instance").isEqualTo("/devices/42");
+
+        verify(service).delete(42L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not-an-id", "9223372036854775808"})
+    void rejectsInvalidDeletionIdBeforeCallingService(String id) {
+        restTestClient.delete().uri("/devices/" + id)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(400)
+                .jsonPath("$.title").isEqualTo("Bad Request")
+                .jsonPath("$.detail").isNotEmpty();
+
+        verifyNoInteractions(service);
+    }
 
     @ParameterizedTest
     @CsvSource({"available, AVAILABLE", "in-use, IN_USE", "inactive, INACTIVE"})

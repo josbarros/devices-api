@@ -4,6 +4,7 @@ import com.devices.api.domain.Device;
 import com.devices.api.domain.DeviceState;
 import com.devices.api.persistence.DeviceRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -22,6 +23,15 @@ public class DeviceService {
 
     public Device getById(Long id) {
         return repository.findById(id).orElseThrow(() -> new DeviceNotFoundException(id));
+    }
+
+    @Transactional
+    public void delete(Long id) {
+        var device = getById(id);
+        if (device.getState() == DeviceState.IN_USE) {
+            throw new DeviceInUseException(id);
+        }
+        repository.delete(device);
     }
 
     public List<Device> getAll(String brand, DeviceState state) {

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
@@ -38,6 +39,104 @@ class DeviceIntegrationTest {
     @BeforeEach
     void clearDevices() {
         repository.deleteAll();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = DeviceState.class, names = {"AVAILABLE", "INACTIVE"})
+    void deletesEligibleCreatedDevice(DeviceState state) {
+        var created = restTestClient.post().uri("/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, "Phone", "Brand", state, null))
+                .exchange()
+                .expectStatus().isCreated()
+                .expectBody(DeviceDto.class)
+                .returnResult().getResponseBody();
+        assertThat(created).isNotNull();
+        var retained = restTestClient.post().uri("/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, "Tablet", "Other", DeviceState.IN_USE, null))
+                .exchange()
+                .expectStatus().isCreated()
+                .expectBody(DeviceDto.class)
+                .returnResult().getResponseBody();
+        assertThat(retained).isNotNull();
+        var location = URI.create("/devices/" + created.id());
+
+        restTestClient.delete().uri(location)
+                .exchange()
+                .expectStatus().isNoContent()
+                .expectBody().isEmpty();
+
+        assertThat(repository.findById(created.id())).isEmpty();
+        assertThat(repository.count()).isEqualTo(1);
+        assertThat(repository.findById(retained.id()).map(DeviceDto::from)).contains(retained);
+
+        restTestClient.get().uri(location)
+                .exchange()
+                .expectStatus().isNotFound();
+        restTestClient.delete().uri(location)
+                .exchange()
+                .expectStatus().isNotFound();
+    }
+
+    @Test
+    void rejectsDeletionOfInUseDeviceWithoutChangingIt() {
+        var created = restTestClient.post().uri("/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DeviceDto(null, "Phone", "Brand", DeviceState.IN_USE, null))
+                .exchange()
+                .expectStatus().isCreated()
+                .expectBody(DeviceDto.class)
+                .returnResult().getResponseBody();
+        assertThat(created).isNotNull();
+        var location = URI.create("/devices/" + created.id());
+
+        restTestClient.delete().uri(location)
+                .exchange()
+                .expectStatus().isEqualTo(409)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(409)
+                .jsonPath("$.title").isEqualTo("Conflict")
+                .jsonPath("$.detail").isEqualTo("Device " + created.id() + " is in use and cannot be deleted")
+                .jsonPath("$.instance").isEqualTo(location.toString());
+
+        assertThat(repository.count()).isEqualTo(1);
+        assertThat(repository.findById(created.id()).map(DeviceDto::from)).contains(created);
+        restTestClient.get().uri(location)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(DeviceDto.class).isEqualTo(created);
+    }
+
+    @Test
+    void returnsProblemDetailsForMissingDeviceDeletion() {
+        restTestClient.delete().uri("/devices/42")
+                .exchange()
+                .expectStatus().isNotFound()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(404)
+                .jsonPath("$.title").isEqualTo("Not Found")
+                .jsonPath("$.detail").isEqualTo("Device 42 not found")
+                .jsonPath("$.instance").isEqualTo("/devices/42");
+
+        assertThat(repository.count()).isZero();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not-an-id", "9223372036854775808"})
+    void rejectsInvalidDeletionId(String id) {
+        restTestClient.delete().uri("/devices/" + id)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(400)
+                .jsonPath("$.title").isEqualTo("Bad Request")
+                .jsonPath("$.detail").isNotEmpty();
+
+        assertThat(repository.count()).isZero();
     }
 
     @ParameterizedTest

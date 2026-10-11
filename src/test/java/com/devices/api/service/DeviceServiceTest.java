@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -31,6 +32,44 @@ class DeviceServiceTest {
 
     @InjectMocks
     private DeviceService service;
+
+    @ParameterizedTest
+    @EnumSource(value = DeviceState.class, names = {"AVAILABLE", "INACTIVE"})
+    void deletesEligibleDevice(DeviceState state) {
+        var saved = new Device("Phone", "Brand", state);
+        when(repository.findById(42L)).thenReturn(Optional.of(saved));
+
+        service.delete(42L);
+
+        verify(repository).findById(42L);
+        verify(repository).delete(saved);
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test
+    void rejectsDeletionOfInUseDevice() {
+        var saved = new Device("Phone", "Brand", DeviceState.IN_USE);
+        when(repository.findById(42L)).thenReturn(Optional.of(saved));
+
+        assertThatThrownBy(() -> service.delete(42L))
+                .isInstanceOf(DeviceInUseException.class)
+                .hasMessage("Device 42 is in use and cannot be deleted");
+
+        verify(repository).findById(42L);
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test
+    void rejectsDeletionOfMissingDevice() {
+        when(repository.findById(42L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.delete(42L))
+                .isInstanceOf(DeviceNotFoundException.class)
+                .hasMessage("Device 42 not found");
+
+        verify(repository).findById(42L);
+        verifyNoMoreInteractions(repository);
+    }
 
     @ParameterizedTest
     @EnumSource(DeviceState.class)
