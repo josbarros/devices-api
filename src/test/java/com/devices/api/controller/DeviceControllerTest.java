@@ -3,7 +3,9 @@ package com.devices.api.controller;
 import com.devices.api.DevicesApiApplication;
 import com.devices.api.domain.Device;
 import com.devices.api.domain.DeviceState;
+import com.devices.api.service.DeviceNotFoundException;
 import com.devices.api.service.DeviceService;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -36,6 +38,59 @@ class DeviceControllerTest {
 
     @MockitoBean
     private DeviceService service;
+
+    @ParameterizedTest
+    @CsvSource({"available, AVAILABLE", "in-use, IN_USE", "inactive, INACTIVE"})
+    void retrievesDeviceOverHttp(String state, DeviceState domainState) {
+        var saved = new Device(" Phone ", " Brand ", domainState);
+        ReflectionTestUtils.setField(saved, "id", 42L);
+        ReflectionTestUtils.setField(saved, "creationTime", Instant.parse("2026-10-11T10:00:00Z"));
+        when(service.getById(42L)).thenReturn(saved);
+
+        restTestClient.get().uri("/devices/42")
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody()
+                .jsonPath("$.id").isEqualTo(42)
+                .jsonPath("$.name").isEqualTo(" Phone ")
+                .jsonPath("$.brand").isEqualTo(" Brand ")
+                .jsonPath("$.state").isEqualTo(state)
+                .jsonPath("$.creationTime").isEqualTo("2026-10-11T10:00:00Z");
+
+        verify(service).getById(42L);
+    }
+
+    @Test
+    void returnsProblemDetailsForMissingDeviceOverHttp() {
+        when(service.getById(42L)).thenThrow(new DeviceNotFoundException(42L));
+
+        restTestClient.get().uri("/devices/42")
+                .exchange()
+                .expectStatus().isNotFound()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(404)
+                .jsonPath("$.title").isEqualTo("Not Found")
+                .jsonPath("$.detail").isEqualTo("Device 42 not found")
+                .jsonPath("$.instance").isEqualTo("/devices/42");
+
+        verify(service).getById(42L);
+    }
+
+    @Test
+    void rejectsInvalidDeviceIdBeforeCallingService() {
+        restTestClient.get().uri("/devices/not-an-id")
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(400)
+                .jsonPath("$.title").isEqualTo("Bad Request")
+                .jsonPath("$.detail").isNotEmpty();
+
+        verifyNoInteractions(service);
+    }
 
     @ParameterizedTest
     @CsvSource({"available, AVAILABLE", "in-use, IN_USE", "inactive, INACTIVE"})

@@ -17,4 +17,8 @@ public class DeviceService {
     public Device create(String name, String brand, DeviceState state) {
         return repository.save(new Device(name, brand, state));
     }
+
+    public Device getById(Long id) {
+        return repository.findById(id).orElseThrow(() -> new DeviceNotFoundException(id));
+    }
 }

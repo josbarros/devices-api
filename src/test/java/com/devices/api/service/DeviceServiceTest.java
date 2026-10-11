@@ -3,6 +3,7 @@ package com.devices.api.service;
 import com.devices.api.domain.Device;
 import com.devices.api.domain.DeviceState;
 import com.devices.api.persistence.DeviceRepository;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -10,7 +11,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.verify;
@@ -24,6 +28,27 @@ class DeviceServiceTest {
 
     @InjectMocks
     private DeviceService service;
+
+    @ParameterizedTest
+    @EnumSource(DeviceState.class)
+    void retrievesDeviceAndReturnsRepositoryResult(DeviceState state) {
+        var saved = new Device("Phone", "Brand", state);
+        when(repository.findById(42L)).thenReturn(Optional.of(saved));
+
+        var retrieved = service.getById(42L);
+
+        assertThat(retrieved).isSameAs(saved);
+        verify(repository).findById(42L);
+    }
+
+    @Test
+    void rejectsRetrievalOfMissingDevice() {
+        when(repository.findById(42L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getById(42L))
+                .isInstanceOf(DeviceNotFoundException.class)
+                .hasMessage("Device 42 not found");
+    }
 
     @ParameterizedTest
     @EnumSource(DeviceState.class)
