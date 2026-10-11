@@ -9,5 +9,6 @@ build/
 .idea/
 *.iml
 *.md
+!README.md
 *.pdf
 
